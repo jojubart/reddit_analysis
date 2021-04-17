@@ -29,19 +29,153 @@ upvotes, comments or general reactions to them.
 
 Let's see what getting reddit data actually looks like.
 First you'll have to [register your reddit app](https://www.reddit.com/prefs/apps/). There you'll get your client_id and client_secret.
+First you need these credentials and your reddit username and password to create a reddit instance.
+I'd strongly advise you to put that information in a separate .ini file and to parse it from there.
+Then add the .ini file to your .gitignore file to avoid leaking your password when commiting this project at some point to a public repository.
+Let's start off really basic and print out the subreddit's name,
+the top submission of the last day and all of its comments for two subreddits and their top post of the past day.
 
 ```python
 import praw
-from datetime import datetime
+import configparser
+
+#################################################
+subreddits = ["aws", "askhistorians"]
+num_posts = 1
+###################################################
+
+config = configparser.ConfigParser()
+config.read("config.ini")
 
 reddit = praw.Reddit(
-    client_id="",
-    client_secret="",
-    user_agent="",
-    username="",
-    password="",
+    client_id=config["PRAW"]["client_id"],
+    client_secret=config["PRAW"]["client_secret"],
+    user_agent=config["PRAW"]["user_agent"],
+    username=config["PRAW"]["username"],
+    password=config["PRAW"]["password"],
 )
+
+for subreddit in subreddits:
+    subreddit = reddit.subreddit(subreddit)
+    print(subreddit.display_name)
+    for submission in subreddit.top("day", limit=num_posts):
+        print(submission.title)
+
+        # show all comments and present them as a list we can loop through
+        submission.comments.replace_more(limit=None)
+        all_comments = submission.comments.list()
+
+        for comment in submission.comments.list():
+            print(comment.body)
+
 ```
+
+Great, that was easy!
+Now we can print out the top posts and their comments. 
+Let's add some structure to that. We could introduce separate data structures for subreddits, submissions and comments, but we will opt to save them right away as dicts, with the goal in mind to transfer them to AWS later on in JSON format.
+
+```python
+#....
+for subreddit in subreddits:
+
+    subreddit = reddit.subreddit(subreddit)
+    subreddit_json = {
+        "url": subreddit.url,
+        "title": subreddit.title,
+        "subscribers": subreddit.subscribers,
+        "description_short": subreddit.public_description,
+        "description_long": subreddit.description,
+        "creation_date": str(datetime.utcfromtimestamp(
+            subreddit.created_utc).strftime('%Y/%m/%d')),
+        "over18": subreddit.over18,
+    }
+
+    for submission in subreddit.top("day", limit=num_posts):
+        timestamp_submssion = str(datetime.utcfromtimestamp(
+            submission.created_utc).strftime('%Y/%m/%d %H:%M:%S'))
+        submission_json = {
+            "timestamp": timestamp_submssion,
+            "submission_id": submission.id,
+            "subreddit": submission.subreddit.url,
+            "title": submission.title,
+            "selftext": submission.selftext,
+            "score": submission.score,
+            "stickied": submission.stickied,
+            "author": str(submission.author),
+            "url": submission.url,
+            "domain": submission.domain,
+            "upvote_ratio": submission.upvote_ratio,
+            "awards": submission.total_awards_received,
+            "current_subreddit_subscribers": submission.subreddit_subscribers,
+            "num_comments": submission.num_comments,
+            "selfpost": submission.is_self,
+            "distinguished": submission.distinguished,
+            "num_awards": submission.total_awards_received
+
+        }
+
+        all_comments = submission.comments.list()
+        for comment in submission.comments.list():
+
+            timestamp_comment = str(datetime.utcfromtimestamp(
+                comment.created_utc).strftime('%Y/%m/%d %H:%M:%S'))
+            comment_json = {
+                "submission_id": submission.id,
+                "timestamp": timestamp_comment,
+                "comment_id": comment.id,
+                "subreddit": str(comment.subreddit),
+                "comment_body": comment.body,
+                "author": str(comment.author),
+                "score": comment.score,
+                "controversiality": comment.controversiality,
+                "num_awards": comment.total_awards_received,
+                "is_submitter": comment.is_submitter,
+                "is_root": comment.is_root,
+                "stickied": comment.stickied,
+            }
+```
+
+Now we have all kinds of information for comments and posts. Scores, number of awards, timestamps and lots more.
+Notice how we're saving the subreddit subscriber count in the submission section additionally to the subreddit_json subscriber count.
+This way we'll know the number of subscribers a subreddit had when posts were made way back in the past.
+All the information so far is given to us straight from reddit, unfiltered and not modified.
+We'd also like to add some immediate insights into the data points. 
+The sentiment of a comment is one such metric that comes to mind immediately. With all the Python packages nowadays out there, this can be done in just a couple of lines. 
+On simple but powerful Natural Language Processing (NLP) package is [TextBlob](https://textblob.readthedocs.io/en/dev/index.html). Additionally we want to add a flag signalling comments and submission titles/descriptions containing profanity.
+
+```bash
+pip install -U textblob
+python -m textblob.download_corpora
+pip install better_profanity
+```
+
+Let's add sentiment and polarity scores to all comments:
+
+```python
+from textblob import TextBlob
+from better_profanity import profanity
+### .....
+for subreddit in subreddits:
+    ###....
+    for submission in subreddit.top("day", limit=num_posts):
+        ###...
+        submission_json = {
+            ###...
+        "contains_profanity": profanity.contains_profanity(submission.title + " " + submission.selftext)
+
+        }
+        for comment in submission.comments.list():
+            blob = TextBlob(comment.body)
+            ###...
+            comment_json = {
+                ###...
+                "subjectivity": blob.subjectivity, # [0.0, 1.0], 0.0: very objective
+                "polarity": blob.polarity # [-1.0, 1.0]
+                "contains_profanity": profanity.contains_profanity(comment.body),
+                
+            }
+
+
 
 ## Storage
 
