@@ -2,15 +2,27 @@ import praw
 import configparser
 from textblob import TextBlob
 from better_profanity import profanity
+import boto3
+from botocore.exceptions import ClientError
+import json
+import logging
 from datetime import datetime
 
 #################################################
+BUCKET_NAME = "rebuzzz"
 subreddits = ["aws", "askhistorians"]
 num_posts = 2
+region_name = "eu-central-1"
+delivery_stream_name = "reddit-stream"
+debug = True
 ###################################################
 
 config = configparser.ConfigParser()
 config.read("config.ini")
+
+firehose_client = boto3.client("firehose", region_name=region_name)
+LOG_FILENAME = "/tmp/reddit_stream.log"
+logging.basicConfig(filename=LOG_FILENAME, level=logging.DEBUG)
 
 reddit = praw.Reddit(
     client_id=config["PRAW"]["client_id"],
@@ -20,10 +32,29 @@ reddit = praw.Reddit(
     password=config["PRAW"]["password"],
 )
 
-# Output: redditdev
-# print(subreddit.title)
-# Output: reddit development
-# print(subreddit.description)
+
+def process_firehose(json_entry):
+    try:
+        response = firehose_client.put_record(
+            DeliveryStreamName=delivery_stream_name,
+            Record={
+                "Data": (json.dumps(json_entry))
+            }
+        )
+        logging.info(response)
+    except Exception:
+        logging.exception("Problem pushing to firehose")
+
+
+def s3_upload(path, file_name, json_object):
+    s3_client.Object(BUCKET_NAME, path + file_name
+                     ).put(Body=json.dumps(json_object, ensure_ascii=False).encode("utf-8"))
+
+
+if debug:
+    num_posts = 7
+    subreddits = ["askhistorians"]
+    s3_client = boto3.resource('s3')
 
 for subreddit in subreddits:
 
@@ -40,7 +71,10 @@ for subreddit in subreddits:
     }
     print(subreddit.display_name)
 
-    for submission in subreddit.top("day", limit=num_posts):
+    s3_upload("subreddit/", f"{subreddit.title}" +
+              str(datetime.now()) + ".json", subreddit_json)
+
+    for submission in subreddit.top(time_filter="day", limit=num_posts):
         timestamp_submssion = str(datetime.utcfromtimestamp(
             submission.created_utc).strftime('%Y/%m/%d %H:%M:%S'))
         submission_json = {
@@ -64,8 +98,10 @@ for subreddit in subreddits:
             "contains_profanity": profanity.contains_profanity(submission.title + " " + submission.selftext)
 
         }
+        s3_upload("submission/", f"{submission.title}" +
+                  str(datetime.now()) + ".json", submission_json)
 
-        all_comments = submission.comments.list()
+        submission.comments.replace_more(limit=0)  # flatten tree
         for comment in submission.comments.list():
             blob = TextBlob(comment.body)
             timestamp_comment = str(datetime.utcfromtimestamp(
@@ -84,26 +120,9 @@ for subreddit in subreddits:
                 "is_root": comment.is_root,
                 "stickied": comment.stickied,
                 "contains_profanity": profanity.contains_profanity(comment.body),
-                # [0.0, 1.0], 0.0: very objective
+                # [0.0, 1.0], 0.0: very objective, 1.0: very subjective
                 "subjectivity": blob.subjectivity,
                 "polarity": blob.polarity,  # [-1.0, 1.0]
             }
-
-
-# subreddits = "nba+wallstreetbets"
-# comment_stream = reddit.subreddit(subreddits)
-# for comment in comment_stream.stream.comments():
-
-#     timestamp = str(datetime.utcfromtimestamp(
-#         comment.created_utc).strftime('%Y/%m/%d %H:%M:%S'))
-
-#     comment_json = {
-#         "timestamp": timestamp,
-#         "comment_id": comment.id,
-#         "subreddit": str(comment.subreddit),
-#         "comment_body": comment.body,
-#         "author": str(comment.author.name),
-#         "submission_title": comment.submission.title,
-#         "submission_score": comment.submission.score,
-
-#     }
+            s3_upload("comment/", f"{comment.author}" +
+                      str(datetime.now()) + ".json", comment_json)

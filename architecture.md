@@ -58,7 +58,7 @@ reddit = praw.Reddit(
 for subreddit in subreddits:
     subreddit = reddit.subreddit(subreddit)
     print(subreddit.display_name)
-    for submission in subreddit.top("day", limit=num_posts):
+    for submission in subreddit.top(time_filter="day", limit=num_posts):
         print(submission.title)
 
         # show all comments and present them as a list we can loop through
@@ -114,7 +114,7 @@ for subreddit in subreddits:
 
         }
 
-        all_comments = submission.comments.list()
+        submission.comments.replace_more(limit=0)  # flatten tree
         for comment in submission.comments.list():
 
             timestamp_comment = str(datetime.utcfromtimestamp(
@@ -174,12 +174,15 @@ for subreddit in subreddits:
                 "contains_profanity": profanity.contains_profanity(comment.body),
                 
             }
+```
 
-
+TextBlob offers several more features such as spelling correction, n-grams and lemmatization.
+We'll leave it at the basics here but feel free to add some more information to the data!
+The next step will be loading the data into AWS, but before we do that we will have to decide where to store the data.
 
 ## Storage
 
-This one's a little bit tricky since we have lots of options, so let's explore them one by one
+For storage we have many different options and here we will explore some of the RDBMS, NoSQL, data lake and data warehouse options offered by AWS.
 
 ### RDS
 
@@ -188,7 +191,7 @@ especially in the beginning when we don't have lots of data. We could organize o
 manner using the 3rd Normal Form and would have tidy and easy to query data. Awesome, looks like a great way to go!
 Well, if you like the smell of burning cash at least. Provisioning lots of storage for RDS comes at quite a cost. 
 Let's say we fill 10 TB of space at some point, at \$0.115/GB that's \$1150 a month for storage alone. So while RDS could be 
-the perfect solution for scraping small subsets of reddit regularly, it might not be ideal for us. 
+the perfect solution for scraping small subsets of reddit regularly, it might not be ideal for us.
 
 ### DynamoDB
 
@@ -240,8 +243,15 @@ So far so good!
 We could also use Redshift Spectrum which has the same price per query as Athena, but then we'd also have to run
 a Redshift cluster and that adds some cost and has no immediate benefits unless we use that cluster elsewhere too.
 
-That settles it. We'll use S3 as a data lake storage and Athena to do the queries. 
+That settles it. We'll use S3 as a data lake storage and Athena to do the queries.
+Now it's time you create a new S3 bucket in AWS with standard settings, the region of your choice and a globally unique bucket name. You can do this by using the S3 console or by using the CLI:
+```bash
+aws s3api create-bucket --bucket my-bucket --region eu-central-1 --create-bucket-configuration LocationConstraint=eu-central-1
+```
+Note: The `--create-bucket-configuration` flag is only necessary for regions other than us-east-1
 
 
-####
+## Data Ingestion with Kinesis Firehose and AWS Glue
 
+When getting the data we need to make sure to transfer the data to S3 in a fast and robust manner.
+Kinesis Firehose's near-real time delivery guarantuee is more than sufficient for our purpose since we plan to get new data once a day/week/month anyway. In this case, we will get data daily but this can be changed easily by changing the `time_filter` parameter to "week" or "month" in the `subreddit.top()` method.
