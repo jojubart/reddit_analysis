@@ -255,3 +255,16 @@ Note: The `--create-bucket-configuration` flag is only necessary for regions oth
 
 When getting the data we need to make sure to transfer the data to S3 in a fast and robust manner.
 Kinesis Firehose's near-real time delivery guarantuee is more than sufficient for our purpose since we plan to get new data once a day/week/month anyway. In this case, we will get data daily but this can be changed easily by changing the `time_filter` parameter to "week" or "month" in the `subreddit.top()` method.
+Additionally we need a way for Firehose to transform our data to Parquet files in the correct schema, which
+is where AWS Glue, an ETL tool, comes into play.
+For setting up the Glue data catalog you can either upload some sample data to S3 for each table (subreddit, comment, submission) and then use the Glue Crawler to automatically create the tables in Glue. You can also add tables manually in the Glue console or you can
+completely automate this task and use a CloudFormation template such as this one [here](glue_resources.yaml).
+
+When using CludFormation, all you need to do is to create a new stack in AWS CloudFormation, upload the YAML file, select the bucket you've created earlier and you're all set - as long as you defined the same columns for the tables as I did.
+Otherwise, just edit the columns for the tables in the YAML file directly.
+
+Next, we'll need to create a firehose data stream for each table. 
+This can be done in the AWS console pretty quickly. 
+Create three firehose delivery streams with direct PUT as source, record format conversion with Parquet as output format, the previously created Glue DB with the corresponding table (subreddit, submission, comment). 
+As prefix, select the table name (e.g. "subreddit/"), as error prefix a name like "subreddit_error/" and don't forget the trailing slashes! 
+The buffers can be maxed out as long as you don't care if it takes a minute or fifteen minutes until data is loaded into S3 and can be queried. 

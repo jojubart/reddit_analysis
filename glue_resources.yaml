@@ -1,313 +1,214 @@
-AWSTemplateFormatVersion: "2010-09-09"
-Description: >
-  This template sets up sample AWS Glue resources for getting Reddit data
+
+AWSTemplateFormatVersion: '2010-09-09'
+
+#
+# Parameters substituted in the Resources section
+# These parameters are names of the resources created in the Data Catalog
 Parameters:
-
-  RedditStreamDatabaseName:
+  DatabaseName:
     Type: String
-    MinLength: "4"
-    Default: "reddit_stream_db"
-    Description: "Name of the AWS Glue database to contain this CloudFormation template's tables."
-
-  SubmissionTableName:
+    Default: reddit_db
+  BucketName:
+      Type: String
+      Description: s3 destination bucket
+  SubredditTable:
     Type: String
-    MinLength: "4"
-    Default: "submission"
-    Description: "Name of the Reddit submission/post data table in AWS Glue."
-
-  SubredditTableName:
+    Default: subreddit
+  SubmissionTable:
     Type: String
-    MinLength: "4"
-    Default: "subreddit"
-    Description: "Name of the subreddit data table in AWS Glue."
-
-  SubredditTableName:
+    Default: submission
+  CommentTable:
     Type: String
-    MinLength: "4"
-    Default: "comment"
-    Description: "Name of the comment data table in AWS Glue."
-
-  ETLScriptsPrefix:
-    Type: String
-    MinLength: "1"
-    Description: "Location of the Glue job ETL scripts in S3."
-
-  ETLOutputPrefix:
-    Type: String
-    MinLength: "1"
-    Description: "Name of the S3 output path to which this CloudFormation template's AWS Glue jobs are going to write ETL output."
-
-  DataBucketName:
-    Type: String
-    MinLength: "1"
-    Description: "Name of the S3 bucket in which the source Marketing and Sales data will be uploaded. Bucket is created by this CFT."
-
-  ArtifactBucketName:
-    Type: String
-    MinLength: "1"
-    Description: "Name of the S3 bucket in which the Marketing and Sales ETL scripts reside. Bucket is NOT created by this CFT."
-
+    Default: comment
+  
+# Resources to create metadata in the Data Catalog
 Resources:
-
-  ### AWS GLUE RESOURCES ###
-  AWSGlueJobRole:
-    Type: "AWS::IAM::Role"
+###
+# Create an AWS Glue database
+  DatabaseReddit:
+    Type: AWS::Glue::Database
     Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - glue.amazonaws.com
-            Action:
-              - sts:AssumeRole
-      Policies:
-        - PolicyName: root
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "s3:GetObject"
-                  - "s3:PutObject"
-                  - "s3:ListBucket"
-                  - "s3:DeleteObject"
-                Resource:
-                  - !Sub "arn:aws:s3:::${DataBucketName}"
-                  - !Sub "arn:aws:s3:::${DataBucketName}/*"
-                  - !Sub "arn:aws:s3:::${ArtifactBucketName}"
-                  - !Sub "arn:aws:s3:::${ArtifactBucketName}/*"
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
-      Path: "/"
-
-
-  MarketingAndSalesDatabase:
-    Type: "AWS::Glue::Database"
-    Properties:
+      CatalogId: !Ref AWS::AccountId
       DatabaseInput:
-        Description: "Marketing and Sales database (Amazon QuickSight Samples)."
-        Name: !Ref MarketingAndSalesDatabaseName
-      CatalogId: !Ref AWS::AccountId
-
-  SalesPipelineTable:
-    Type: "AWS::Glue::Table"
-    DependsOn: MarketingAndSalesDatabase
+        Name: !Ref DatabaseName	
+        Description: Database to reddit data
+###
+# Create the AWS Glue tables
+  TableSubreddit:
+    # Creating the table waits for the database to be created
+    DependsOn: DatabaseReddit
+    Type: AWS::Glue::Table
     Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseName: !Ref DatabaseName
       TableInput:
-        Description: "Sales Pipeline table (Amazon QuickSight Sample)."
-        TableType: "EXTERNAL_TABLE"
+        Name: !Ref SubredditTable
+        Description: Define the columns of the subreddit table
+        TableType: EXTERNAL_TABLE
         Parameters: {
-                "CrawlerSchemaDeserializerVersion": "1.0",
-                "compressionType": "none",
-                "classification": "csv",
-                "recordCount": "16831",
-                "typeOfData": "file",
-                "CrawlerSchemaSerializerVersion": "1.0",
-                "columnsOrdered": "true",
-                "objectCount": "1",
-                "delimiter": ",",
-                "skip.header.line.count": "1",
-                "averageRecordSize": "119",
-                "sizeKey": "2002910"
-        }
+    "classification": "parquet"
+  }
         StorageDescriptor:
-          StoredAsSubDirectories: False
-          Parameters: {
-                  "CrawlerSchemaDeserializerVersion": "1.0",
-                  "compressionType": "none",
-                  "classification": "csv",
-                  "recordCount": "16831",
-                  "typeOfData": "file",
-                  "CrawlerSchemaSerializerVersion": "1.0",
-                  "columnsOrdered": "true",
-                  "objectCount": "1",
-                  "delimiter": ",",
-                  "skip.header.line.count": "1",
-                  "averageRecordSize": "119",
-                  "sizeKey": "2002910"
-          }
-          InputFormat: "org.apache.hadoop.mapred.TextInputFormat"
-          OutputFormat: "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat"
           Columns:
-            - Type: string
-              Name: date
-            - Type: string
-              Name: salesperson
-            - Type: string
-              Name: lead name
-            - Type: string
-              Name: segment
-            - Type: string
-              Name: region
-            - Type: string
-              Name: target close
-            - Type: bigint
-              Name: forecasted monthly revenue
-            - Type: string
-              Name: opportunity stage
-            - Type: bigint
-              Name: weighted revenue
-            - Type: boolean
-              Name: closed opportunity
-            - Type: boolean
-              Name: active opportunity
-            - Type: boolean
-              Name: latest status entry
+            - Name: url
+              Type: string
+            - Name: title
+              Type: string
+            - Name: subscribers
+              Type: int
+            - Name: description_short
+              Type: string
+            - Name: description_long
+              Type: string
+            - Name: creation_date
+              Type: string
+            - Name: over18
+              Type: boolean
+          Location:
+            Fn::Join:
+                - ''
+                - - "s3://"
+                  - !Ref BucketName
+                  - "/subreddit/"
+          InputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat
+          OutputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat
+          BucketColumns: []
+          SortColumns: []
           SerdeInfo:
-            Parameters: {
-                        "field.delim": ","
-            }
-            SerializationLibrary: "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe"
-          Compressed: False
-          Location: !Sub "s3://${DataBucketName}/sales/"
-        Retention: 0
-        Name: !Ref SalesPipelineTableName
-      DatabaseName: !Ref MarketingAndSalesDatabaseName
-      CatalogId: !Ref AWS::AccountId
+            SerializationLibrary: org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe
+            Parameters:
+              serialization.format: '1'
+              "parquet.compression": "SNAPPY"
+          StoredAsSubDirectories: false
 
-  MarketingTable:
-    Type: "AWS::Glue::Table"
-    DependsOn: MarketingAndSalesDatabase
+  TableSubmission:
+    # Creating the table waits for the database to be created
+    DependsOn: DatabaseReddit
+    Type: AWS::Glue::Table
     Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseName: !Ref DatabaseName
       TableInput:
-        Description: "Marketing table (Amazon QuickSight Sample)."
-        TableType: "EXTERNAL_TABLE"
+        Name: !Ref SubmissionTable
+        Description: Define the columns of the submission table
+        TableType: EXTERNAL_TABLE
         Parameters: {
-                    "CrawlerSchemaDeserializerVersion": "1.0",
-                    "compressionType": "none",
-                    "classification": "csv",
-                    "recordCount": "948",
-                    "typeOfData": "file",
-                    "CrawlerSchemaSerializerVersion": "1.0",
-                    "columnsOrdered": "true",
-                    "objectCount": "1",
-                    "delimiter": ",",
-                    "skip.header.line.count": "1",
-                    "averageRecordSize": "160",
-                    "sizeKey": "151746"
-        }
+    "classification": "parquet"
+  }
+
         StorageDescriptor:
-          StoredAsSubDirectories: False
-          Parameters: {
-                    "CrawlerSchemaDeserializerVersion": "1.0",
-                    "compressionType": "none",
-                    "classification": "csv",
-                    "recordCount": "948",
-                    "typeOfData": "file",
-                    "CrawlerSchemaSerializerVersion": "1.0",
-                    "columnsOrdered": "true",
-                    "objectCount": "1",
-                    "delimiter": ",",
-                    "skip.header.line.count": "1",
-                    "averageRecordSize": "160",
-                    "sizeKey": "151746"
-          }
-          InputFormat: "org.apache.hadoop.mapred.TextInputFormat"
-          OutputFormat: "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat"
           Columns:
-            - Type: string
-              Name: date
-            - Type: bigint
-              Name: new visitors seo
-            - Type: bigint
-              Name: new visitors cpc
-            - Type: bigint
-              Name: new visitors social media
-            - Type: bigint
-              Name: return visitors
-            - Type: bigint
-              Name: twitter mentions
-            - Type: bigint
-              Name: twitter follower adds
-            - Type: bigint
-              Name: twitter followers cumulative
-            - Type: bigint
-              Name: mailing list adds
-            - Type: bigint
-              Name: mailing list cumulative
-            - Type: bigint
-              Name: website pageviews
-            - Type: bigint
-              Name: website visits
-            - Type: bigint
-              Name: website unique visits
-            - Type: bigint
-              Name: mobile uniques
-            - Type: bigint
-              Name: tablet uniques
-            - Type: bigint
-              Name: desktop uniques
-            - Type: bigint
-              Name: free sign up
-            - Type: bigint
-              Name: paid conversion
-            - Type: string
-              Name: events
+            - Name: timestamp
+              Type: string
+            - Name: submission_id
+              Type: string
+            - Name: subreddit
+              Type: string
+            - Name: title
+              Type: string
+            - Name: selftext
+              Type: string
+            - Name: score
+              Type: int
+            - Name: stickied
+              Type: boolean
+            - Name: author
+              Type: string
+            - Name: url
+              Type: string
+            - Name: domain
+              Type: string
+            - Name: upvote_ratio
+              Type: double
+            - Name: current_subreddit_subscribers
+              Type: int
+            - Name: num_comments
+              Type: int
+            - Name: selfpost
+              Type: boolean
+            - Name: distinguished
+              Type: string
+            - Name: num_awards
+              Type: int
+            - Name: contains_profanity
+              Type: boolean
+          Location:
+            Fn::Join:
+                - ''
+                - - "s3://"
+                  - !Ref BucketName
+                  - "/submission/"
+          InputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat
+          OutputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat
+          BucketColumns: []
+          SortColumns: []
           SerdeInfo:
-            Parameters: {
-                        "field.delim": ","
-            }
-            SerializationLibrary: "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe"
-          Compressed: False
-          Location: !Sub "s3://${DataBucketName}/marketing/"
-        Retention: 0
-        Name: !Ref MarketingTableName
-      DatabaseName: !Ref MarketingAndSalesDatabaseName
-      CatalogId: !Ref AWS::AccountId
+            SerializationLibrary: org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe
+            Parameters:
+              serialization.format: '1'
+              "parquet.compression": "SNAPPY"
+          StoredAsSubDirectories: false
 
-  ProcessSalesDataJob:
-    Type: "AWS::Glue::Job"
-    Properties:
-      Role: !Ref AWSGlueJobRole
-      Name: "ProcessSalesData"
-      Command: {
-        "Name" : "glueetl",
-        "ScriptLocation": !Sub "s3://${ArtifactBucketName}/${ETLScriptsPrefix}/process_sales_data.py"
-      }
-      DefaultArguments: {
-          "--database_name" : !Ref MarketingAndSalesDatabaseName,
-          "--table_name" : !Ref SalesPipelineTableName,
-          "--s3_output_path": !Sub "s3://${DataBucketName}/${ETLOutputPrefix}/tmp/sales"
-      }
-      MaxRetries: 0
-      Description: "Process Sales Pipeline data."
-      AllocatedCapacity: 5
+  TableComment:
+      # Creating the table waits for the database to be created
+      DependsOn: DatabaseReddit
+      Type: AWS::Glue::Table
+      Properties:
+        CatalogId: !Ref AWS::AccountId
+        DatabaseName: !Ref DatabaseName
+        TableInput:
+          Name: !Ref CommentTable
+          Description: Define the columns of the comment table
+          TableType: EXTERNAL_TABLE
+          Parameters: {
+      "classification": "parquet"
+    }
 
-  ProcessMarketingDataJob:
-    Type: "AWS::Glue::Job"
-    Properties:
-      Role: !Ref AWSGlueJobRole
-      Name: "ProcessMarketingData"
-      Command: {
-        "Name" : "glueetl",
-        "ScriptLocation": !Sub "s3://${ArtifactBucketName}/${ETLScriptsPrefix}/process_marketing_data.py"
-      }
-      DefaultArguments: {
-          "--database_name" : !Ref MarketingAndSalesDatabaseName,
-          "--table_name" : !Ref MarketingTableName,
-          "--s3_output_path": !Sub "s3://${DataBucketName}/${ETLOutputPrefix}/tmp/marketing"
-      }
-      MaxRetries: 0
-      Description: "Process Marketing data."
-      AllocatedCapacity: 5
-
-  JoinMarketingAndSalesDataJob:
-    Type: "AWS::Glue::Job"
-    Properties:
-      Role: !Ref AWSGlueJobRole
-      Name: "JoinMarketingAndSalesData"
-      Command: {
-        "Name" : "glueetl",
-        "ScriptLocation": !Sub "s3://${ArtifactBucketName}/${ETLScriptsPrefix}/join_marketing_and_sales_data.py"
-      }
-      DefaultArguments: {
-        "--database_name": !Ref MarketingAndSalesDatabaseName,
-        "--s3_output_path": !Sub "s3://${DataBucketName}/${ETLOutputPrefix}/sales-leads-influenced",
-        "--s3_sales_data_path": !Sub "s3://${DataBucketName}/${ETLOutputPrefix}/tmp/sales",
-        "--s3_marketing_data_path": !Sub "s3://${DataBucketName}/${ETLOutputPrefix}/tmp/marketing"
-      }
-      MaxRetries: 0
-      Description: "Join Marketing and Sales data."
-      AllocatedCapacity: 5
+          StorageDescriptor:
+            Columns:
+              - Name: submission_id
+                Type: string
+              - Name: timestamp
+                Type: string
+              - Name: comment_id
+                Type: string
+              - Name: subreddit
+                Type: string
+              - Name: comment_body
+                Type: string
+              - Name: author
+                Type: string
+              - Name: score
+                Type: int
+              - Name: controversiality
+                Type: int
+              - Name: num_awards
+                Type: int
+              - Name: is_submitter
+                Type: boolean
+              - Name: is_root
+                Type: boolean
+              - Name: stickied
+                Type: boolean
+              - Name: contains_profanity
+                Type: boolean
+              - Name: subjectivity
+                Type: double
+              - Name: polarity
+                Type: double
+            Location:
+              Fn::Join:
+                  - ''
+                  - - "s3://"
+                    - !Ref BucketName
+                    - "/comment/"
+            InputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat
+            OutputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat
+            BucketColumns: []
+            SortColumns: []
+            SerdeInfo:
+              SerializationLibrary: org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe
+              Parameters:
+                serialization.format: '1'
+                "parquet.compression": "SNAPPY"
+            StoredAsSubDirectories: false
