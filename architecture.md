@@ -1,10 +1,11 @@
 # Reddit Analysis
 
-## General Idea
+## Overview
 
 get reddit posts and comments and analyze them - looking for trends
 The idea of this little project is aggregating the top posts and their comments from selected subreddits. 
-Then the data is used for analyzing trends, looking for subreddit clusters and explorative data analysis in general.
+Afterwards the data can be used for analyzing trends, looking for subreddit clusters and explorative data analysis in general.
+We'll go through all the necessary steps and will be looking for a cost effective solution here.
 
 ## Getting the Data
 
@@ -80,6 +81,7 @@ for subreddit in subreddits:
 
     subreddit = reddit.subreddit(subreddit)
     subreddit_json = {
+        "timestamp": str(datetime.utcnow().strftime('%Y/%m/%d %H:%M:%S')),
         "url": subreddit.url,
         "title": subreddit.title,
         "subscribers": subreddit.subscribers,
@@ -123,7 +125,7 @@ for subreddit in subreddits:
                 "submission_id": submission.id,
                 "timestamp": timestamp_comment,
                 "comment_id": comment.id,
-                "subreddit": str(comment.subreddit),
+                "subreddit": submission.subreddit.url,
                 "comment_body": comment.body,
                 "author": str(comment.author),
                 "score": comment.score,
@@ -266,5 +268,26 @@ Otherwise, just edit the columns for the tables in the YAML file directly.
 Next, we'll need to create a firehose data stream for each table. 
 This can be done in the AWS console pretty quickly. 
 Create three firehose delivery streams with direct PUT as source, record format conversion with Parquet as output format, the previously created Glue DB with the corresponding table (subreddit, submission, comment). 
-As prefix, select the table name (e.g. "subreddit/"), as error prefix a name like "subreddit_error/" and don't forget the trailing slashes! 
-The buffers can be maxed out as long as you don't care if it takes a minute or fifteen minutes until data is loaded into S3 and can be queried. 
+As prefix, select the table name (e.g. "subreddit/"), as error prefix a name like "subreddit_error/" and don't forget the trailing slashes!
+The buffers can be maxed out as long as you don't care if it takes a minute or fifteen minutes until data is loaded into S3.
+
+## Running the Script
+
+The easiest way to run the script is installing the AWS CLI and configure it with the appropriate access key.
+Afterwards you can set up a CRON job to run the script daily.
+
+```bash
+00 00 * * * cd path/to/project; source env/bin/activate; python3 stream.py
+```
+
+This variant requires that your machine is always running at the specified time, which is pretty inconvenient, unless you have a server that's running 24/7 anyway. 
+
+Another option is running an EC2 instance and setting up the CRON job there. With a t2.nano instance, which should suffice for our purpose, that amounts to roughly $4 a month.
+
+One downside of the CRON job approach is that we wouldn't get the top post of each subreddit at the same time each day.
+When querying 100 subreddits each day sequentially the 100th subreddit will sometimes be queried at sometimes vastly different times, depending on the daily reddit API traffic and the number of comments in the queried subreddits. This way we run the danger of either missing some posts from the previous day or getting duplicates.
+To mitigate this issue, we can restructure our code a little to get all submission first, before getting the comments, which takes up the most time by a big margin. 
+While looping through the subreddits and submissions we append the submission to a `submission_list`. Even with over 100 subreddits this step will be done really quickly and takes up pretty much the same amount of time each day, since the number of posts will stay the same and the API limitations should not be a factor here with such a low number of requests.
+
+@TODO: 
+Explain how to set up EC2 with parameter store, automatic daily start and shut downs (https://aws.amazon.com/premiumsupport/knowledge-center/stop-start-instance-scheduler/) and maybe CloudFormation setup.

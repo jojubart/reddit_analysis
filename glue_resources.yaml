@@ -50,6 +50,8 @@ Resources:
   }
         StorageDescriptor:
           Columns:
+            - Name: timestamp
+              Type: string
             - Name: url
               Type: string
             - Name: title
